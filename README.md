@@ -536,18 +536,6 @@ The following metrics are exposed at `GET /actuator/prometheus` and can be visua
 
 ---
 
-## Resume-Ready Bullets
-
-Use these when describing this project on your resume or in interviews:
-
-> **Architected a high-throughput notification engine** in Java + Spring Boot, processing 50,000+ notifications/hour across Email, SMS, and Push channels via Apache Kafka with separate priority-tiered topics and consumer thread pools.
-
-> **Designed idempotent message processing** using Redis-backed deduplication (SETNX), eliminating duplicate deliveries under Kafka consumer retries; implemented exponential backoff with Dead Letter Queue routing for failed dispatches.
-
-> **Built a delivery status state machine** (QUEUED → DISPATCHED → DELIVERED/FAILED) with MySQL persistence, full audit logging, and a Redis cache layer enabling real-time delivery tracking with < 50ms read latency.
-
----
-
 ## License
 
 MIT
