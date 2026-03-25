@@ -1,0 +1,140 @@
+version: '3.8'
+
+services:
+  # ─── Infrastructure ────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: ne-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - ne-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: ne-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: 6
+    networks:
+      - ne-network
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: ne-kafka-init
+    depends_on:
+      - kafka
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      echo 'Waiting for Kafka to be ready...'
+      cub kafka-ready -b kafka:29092 1 60
+
+      echo 'Creating Kafka topics...'
+
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 \
+        --topic notifications.high-priority \
+        --partitions 6 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 \
+        --topic notifications.low-priority \
+        --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 \
+        --topic notifications.dlq \
+        --partitions 2 --replication-factor 1 \
+        --config retention.ms=2592000000
+
+      echo 'Topics created:'
+      kafka-topics --list --bootstrap-server kafka:29092
+      "
+    networks:
+      - ne-network
+
+  mysql:
+    image: mysql:8.0
+    container_name: ne-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: notification_engine
+      MYSQL_USER: ne_user
+      MYSQL_PASSWORD: ne_password
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./src/main/resources/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ne-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ne-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ne-network
+
+  # ─── Application ───────────────────────────────────────────
+  notification-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ne-app
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/notification_engine?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: ne_user
+      SPRING_DATASOURCE_PASSWORD: ne_password
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    networks:
+      - ne-network
+
+volumes:
+  mysql-data:
+  redis-data:
+
+networks:
+  ne-network:
+    driver: bridge

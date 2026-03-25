@@ -1,0 +1,112 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: notification-engine
+
+  # ─── MySQL ─────────────────────────────────────────────────
+  datasource:
+    url: jdbc:mysql://localhost:3306/notification_engine?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ne_user
+    password: ne_password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+
+  # ─── Kafka ─────────────────────────────────────────────────
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        linger.ms: 10
+        batch.size: 32768
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.notificationengine.*"
+      enable-auto-commit: false
+
+  # ─── Redis ─────────────────────────────────────────────────
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 5000ms
+
+  # ─── Jackson ───────────────────────────────────────────────
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+# ─── App Config ──────────────────────────────────────────────
+notification:
+  kafka:
+    topics:
+      high-priority: notifications.high-priority
+      low-priority: notifications.low-priority
+      dlq: notifications.dlq
+    consumer:
+      high-priority-concurrency: 6
+      low-priority-concurrency: 3
+
+  retry:
+    max-attempts: 5
+    initial-interval-ms: 1000
+    multiplier: 2.0
+    max-interval-ms: 60000
+
+  idempotency:
+    ttl-hours: 24
+
+  channels:
+    email:
+      enabled: true
+    sms:
+      enabled: true
+    push:
+      enabled: true
+
+# ─── Actuator / Metrics ─────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: notification-engine
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.notificationengine: DEBUG
+    org.apache.kafka: WARN
+    org.springframework.kafka: INFO
